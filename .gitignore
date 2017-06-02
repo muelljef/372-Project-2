@@ -1,0 +1,5 @@
+.idea/
+*pyc
+CMakeLists.txt
+cmake-build-debug/
+ftserver

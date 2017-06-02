@@ -1,0 +1,110 @@
+#!/usr/bin/python
+from socket import *
+import signal
+import sys
+
+def main():
+    clientSocket, command, filename, fileTransferPort = initiateContact()
+    makeRequest(clientSocket, command, filename, fileTransferPort)
+    clientSocket.close()
+
+
+'''
+    initiateContact(): Initiates contact with the server using the given server host and server port #
+'''
+def initiateContact():
+    try:
+        clientSocket = socket(AF_INET, SOCK_STREAM)
+    except:
+        print 'Failed to connect to ftserver.'
+        exit(1)
+
+    # get the command line params
+    serverHost, serverPort, command, filename, fileTransferPort = getAndValidateArguments()
+
+    serverIp = gethostbyname(serverHost)
+    clientSocket.connect((serverIp, serverPort))
+
+    return clientSocket, command, filename, fileTransferPort
+
+
+'''
+    getPortNumber(): Gets the port number from the command line arguments and converts it to an integer
+    success: returns int serverPort
+    failure: prints error to screen and exits the program
+'''
+def getAndValidateArguments():
+    if len(sys.argv) != 5:
+        print 'usage: ftclient <host> <server-port#> <command> <file-transfer-port#>'
+        sys.exit(1)
+
+    try:
+        serverHost = sys.argv[1]
+        serverPort = int(sys.argv[2])
+        command = sys.argv[3]
+        filename = ''
+        fileTransferPort = int(sys.argv[4])
+    except ValueError:
+        print 'A port number provided was not a valid integer'
+        sys.exit(1)
+
+    if serverPort < 1 or serverPort > 65535:
+        print 'Invalid server port number ' + str(serverPort)
+        sys.exit(1)
+
+    if fileTransferPort < 1 or fileTransferPort > 65535:
+        print 'Invalid file transfer port number ' + str(fileTransferPort)
+        sys.exit(1)
+
+    return serverHost, serverPort, command, filename, fileTransferPort
+
+
+'''
+    makeRequest(): 
+'''
+def makeRequest(clientSocket, command, filename, fileTransferPort):
+    clientSocket.send(command)
+    msg = clientSocket.recv(1024)
+    if msg != '1':
+        print 'Server did not recognize the command'
+        sys.exit(1)
+
+    try:
+        dataSocket = socket(AF_INET, SOCK_STREAM)
+        # the following link provided the solution to make the socket available immediately after closing the program
+        # http://stackoverflow.com/questions/27360218/how-to-close-socket-connection-on-ctrl-c-in-a-python-programme
+        dataSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        dataSocket.bind(('', fileTransferPort))
+        dataSocket.listen(1)
+    except:
+        print 'Failed to bind the port' + str(fileTransferPort)
+        sys.exit(1)
+
+    # send the port number
+    clientSocket.send(str(fileTransferPort))
+    msg = clientSocket.recv(1024);
+    print msg
+
+    if msg != '1':
+        print 'Server failed to connect\n' + msg + '\n'
+        sys.exit(1)
+
+    dataConnectionSocket, addr = dataSocket.accept()
+
+    msg = dataConnectionSocket.recv(1024)
+    print msg + '\n'
+
+    dataConnectionSocket.close()
+    dataSocket.close()
+
+
+'''
+    receiveFile(): 
+'''
+def receiveFile():
+    pass
+
+
+if __name__ == "__main__":
+    main()
+
