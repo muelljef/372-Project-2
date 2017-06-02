@@ -67,7 +67,7 @@ def makeRequest(clientSocket, command, filename, fileTransferPort):
     msg = clientSocket.recv(1024)
     if msg != '1':
         print 'Server did not recognize the command'
-        sys.exit(1)
+        return
 
     try:
         dataSocket = socket(AF_INET, SOCK_STREAM)
@@ -78,16 +78,22 @@ def makeRequest(clientSocket, command, filename, fileTransferPort):
         dataSocket.listen(1)
     except:
         print 'Failed to bind the port' + str(fileTransferPort)
-        sys.exit(1)
+        return
+
+    # send the host name
+    clientSocket.send(gethostname())
+    msg = clientSocket.recv(1024)
+    if msg != '1':
+        print 'Server did not recognize the command'
+        return
 
     # send the port number
     clientSocket.send(str(fileTransferPort))
     msg = clientSocket.recv(1024);
-    print msg
-
     if msg != '1':
-        print 'Server failed to connect\n' + msg + '\n'
-        sys.exit(1)
+        print 'Server failed to connect\n'
+        dataSocket.close()
+        return
 
     dataConnectionSocket, addr = dataSocket.accept()
 

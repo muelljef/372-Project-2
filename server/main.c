@@ -1,22 +1,23 @@
 #include <stdio.h>
-#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netdb.h>
+#include <dirent.h>
+#include <signal.h>
 #include <syslog.h>
 #include <errno.h>
 #include <sys/wait.h>
 #include <fcntl.h>
-#include <netdb.h>
 
 #define BSIZE 4096
 
 int startUp(int argc, char *argv[]);
 void error(const char *msg);
-int contactClientDataSocket(uint16_t portno);
+int contactClientDataSocket(char *hostname, uint16_t portno);
 void handleRequest(int connectionSocketFd);
 
 int main(int argc, char *argv[]) {
@@ -49,7 +50,7 @@ int main(int argc, char *argv[]) {
 
 void handleRequest(int connectionSocketFd)
 {
-    char buffer[BSIZE];
+    char buffer[BSIZE], hostname[BSIZE];
     uint16_t portno;
     int dataSockFd;
     struct sockaddr_in serv_addr;
@@ -72,20 +73,56 @@ void handleRequest(int connectionSocketFd)
         // indicate successful command
         write(connectionSocketFd, "1", 1);
 
+        // read the host name
+        memset(hostname, '\0', BSIZE);
+        read(connectionSocketFd, hostname, BSIZE - 1);
+        if (strlen(hostname) < 1) {
+            fprintf(stderr, "ERROR, no host name given, %s\n", hostname);
+            write(connectionSocketFd, "0", 1);
+            return;
+        }
+        printf("client host name: %s\n", hostname);
+        // indicate successfully retrieved hostname
+        write(connectionSocketFd, "1", 1);
+
         // read the port number to connect on
         memset(buffer, '\0', BSIZE);
         read(connectionSocketFd, buffer, BSIZE - 1);
         portno = (uint16_t) atoi(buffer);
         if (portno == 0) {
             fprintf(stderr, "ERROR, invalid port number, %u\n", portno);
-            exit(1);
+            write(connectionSocketFd, "0", 1);
+            return;
         }
         printf("client data port number: %u\n", portno);
+        // indicate successful port number
         write(connectionSocketFd, "1", 1);
 
         // Send message to client, this could be files
-        dataSockFd = contactClientDataSocket(portno);
-        write(dataSockFd, "Blah, blah, blah", strlen("Blah, blah, blah"));
+        dataSockFd = contactClientDataSocket(hostname, portno);
+        if (dataSockFd < 0) {
+            fprintf(stderr, "ERROR, could not connect to client data socket, %u\n", portno);
+            write(connectionSocketFd, "0", 1);
+            return;
+        }
+
+        // Write files to socket
+        // source for code
+        // https://www.gnu.org/software/libc/manual/html_node/Simple-Directory-Lister.html
+        // TODO: make sure cannot do buffer overflow
+        memset(buffer, '\0', BSIZE);
+        DIR *directory;
+        struct dirent *entry;
+        directory = opendir("./");
+        if (directory != NULL) {
+            while (entry = readdir(directory)) {
+                strcat(buffer, entry->d_name);
+                strcat(buffer, "\n");
+            }
+            closedir(directory);
+        }
+
+        write(dataSockFd, buffer, strlen(buffer));
 
         // close the connection
         close(dataSockFd);
@@ -142,7 +179,7 @@ int startUp(int argc, char *argv[])
     return sockfd;
 }
 
-int contactClientDataSocket(uint16_t portno)
+int contactClientDataSocket(char *hostname, uint16_t portno)
 {
     int dataSockFd;
     struct sockaddr_in serv_addr;
@@ -152,15 +189,14 @@ int contactClientDataSocket(uint16_t portno)
     dataSockFd = socket(AF_INET, SOCK_STREAM, 0);
     if (dataSockFd < 0) {
         fprintf(stderr, "Error opening socket");
-        exit(1);
+        return -1;
     }
 
     // Get server details
-    // TODO: have host send this info and use it
-    server = gethostbyname("localhost");
+    server = gethostbyname(hostname);
     if (server == NULL) {
         fprintf(stderr, "ERROR, no such host\n");
-        exit(1);
+        return -1;
     }
 
     //Setting server details in struct serv_addr
@@ -172,7 +208,7 @@ int contactClientDataSocket(uint16_t portno)
     //Connect to the socket
     if (connect(dataSockFd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
         fprintf(stderr, "Could not connect to port %u\n", portno);
-        exit(1);
+        return -1;
     }
 
     return dataSockFd;
