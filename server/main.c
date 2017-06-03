@@ -32,29 +32,23 @@ int main(int argc, char *argv[]) {
         connectionSocketFd = accept(sockfd, NULL, NULL);
 
         if (connectionSocketFd < 0) {
-            // TODO: what to do here? is this correct?
             perror("accept");
             continue;
         }
-        // TODO: add host to message if possible, maybe move this to
 
-        // TODO: handle the response
         handleRequest(connectionSocketFd);
         close(connectionSocketFd);
-        break;
+        // TODO: add SIGINT handler above to close the sockfd
+//        close(sockfd);
+//        return 0;
     }
-
-    close(sockfd);
-    return 0;
 }
 
 void handleRequest(int connectionSocketFd)
 {
-    char buffer[BSIZE], clientHostname[BSIZE], serverHostname[BSIZE];
+    char buffer[BSIZE], clientHostname[BSIZE], serverHostname[BSIZE], filename[BSIZE];
     uint16_t portno;
     int dataSockFd;
-    struct sockaddr_in serv_addr;
-    struct hostent *server;
 
     memset(serverHostname, '\0', BSIZE);
     if (gethostname(serverHostname, BSIZE - 1) < 0) {
@@ -90,13 +84,36 @@ void handleRequest(int connectionSocketFd)
     memset(buffer, '\0', BSIZE);
     read(connectionSocketFd, buffer, 2);
     // Sending files
-//    if (strncmp(buffer, "-g", 2) == 0) {
-//        write(connectionSocketFd, "1", 1);
-//        // TODO: implement action
-//        memset(buffer, '\0', BSIZE);
-//        read(connectionSocketFd, buffer, 2);
-//        return;
-//    }
+    if (strncmp(buffer, "-g", 2) == 0) {
+        // indicate the command is recognized
+        write(connectionSocketFd, "1", 1);
+
+        // read the filename
+        memset(filename, '\0', BSIZE);
+        read(connectionSocketFd, filename, BSIZE - 1);
+        if (strlen(filename) < 1) {
+            fprintf(stderr, "ERROR, no file name given, %s\n", filename);
+            write(connectionSocketFd, "0", 1);
+            return;
+        }
+        // indicate successfully retrieved filename
+        printf("File \"%s\" requested on port %u\n", filename, portno);
+        write(connectionSocketFd, "1", 1);
+
+        // TODO: implement action
+        // Send message to client, this could be files
+        dataSockFd = contactClientDataSocket(clientHostname, portno);
+        if (dataSockFd < 0) {
+            fprintf(stderr, "ERROR, could not connect to client data socket, %u\n", portno);
+            write(connectionSocketFd, "0", 1);
+            return;
+        }
+
+        // close the connection
+        close(dataSockFd);
+
+        return;
+    }
 
     // Listing files
     if (strncmp(buffer, "-l", 2) == 0) {
@@ -212,8 +229,10 @@ int contactClientDataSocket(char *hostname, uint16_t portno)
     serv_addr.sin_port = htons(portno);
 
     //Connect to the socket
+    sleep(1);
     if (connect(dataSockFd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        fprintf(stderr, "Could not connect to port %u\n", portno);
+        perror("data sock");
+//        fprintf(stderr, "Could not connect to port %u\n", portno);
         return -1;
     }
 

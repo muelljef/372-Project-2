@@ -34,18 +34,32 @@ def initiateContact():
     failure: prints error to screen and exits the program
 '''
 def getAndValidateArguments():
-    if len(sys.argv) != 5:
-        print 'usage: ftclient <host> <server-port#> <command> <file-transfer-port#>'
+    usage = 'usage: ftclient hostname server_port_number [-g filename | -l] data_transfer_port\n'
+
+    if len(sys.argv) != 5 and len(sys.argv) != 6:
+        print usage
         sys.exit(1)
 
     try:
         serverHost = sys.argv[1]
         serverPort = int(sys.argv[2])
         command = sys.argv[3]
-        filename = ''
-        fileTransferPort = int(sys.argv[4])
+        if command == '-g':
+            if len(sys.argv) != 6:
+                print 'Invalid number of arguments for command: ' + command + '\n';
+                print usage
+                sys.exit(1)
+            filename = sys.argv[4]
+            fileTransferPort = int(sys.argv[5])
+        elif command == '-l':
+            filename = ''
+            fileTransferPort = int(sys.argv[4])
+        else:
+            print 'Invalid command given: ' + command + '\n';
+            print usage
+            sys.exit(1)
     except ValueError:
-        print 'A port number provided was not a valid integer'
+        print 'A port number provided was not a valid integer\n'
         sys.exit(1)
 
     if serverPort < 1 or serverPort > 65535:
@@ -53,7 +67,7 @@ def getAndValidateArguments():
         sys.exit(1)
 
     if fileTransferPort < 1 or fileTransferPort > 65535:
-        print 'Invalid file transfer port number ' + str(fileTransferPort)
+        print 'Invalid file transfer port number ' + str(fileTransferPort) + '\n'
         sys.exit(1)
 
     return serverHost, serverPort, command, filename, fileTransferPort
@@ -84,6 +98,13 @@ def makeRequest(clientSocket, command, filename, fileTransferPort):
         print 'Server did not recognize the command'
         return
 
+    if command == '-g':
+        clientSocket.send(filename)
+        msg = clientSocket.recv(1024)
+        if msg != '1':
+            print 'Server did not read the filename'
+            return
+
     try:
         dataSocket = socket(AF_INET, SOCK_STREAM)
         # the following link provided the solution to make the socket available immediately after closing the program
@@ -98,9 +119,15 @@ def makeRequest(clientSocket, command, filename, fileTransferPort):
     dataConnectionSocket, addr = dataSocket.accept()
 
     # TODO: I think using the string file transfer port is wrong here (should be the port the server allocates right?)
-    print "Receiving directory structure from " + serverHostname + "\n"
-    msg = dataConnectionSocket.recv(1024)
-    print msg + '\n'
+    if command == '-l':
+        print "Receiving directory structure from " + serverHostname + "\n"
+        msg = dataConnectionSocket.recv(1024)
+        print msg + '\n'
+
+    if command == '-g':
+        print "Receiving file from " + serverHostname + "\n"
+        # msg = dataConnectionSocket.recv(1024)
+        # print msg + '\n'
 
     dataConnectionSocket.close()
     dataSocket.close()
