@@ -14,11 +14,13 @@
 #include <fcntl.h>
 
 #define BSIZE 4096
+#define CHUNK_SIZE 512
 
 int startUp(int argc, char *argv[]);
 void error(const char *msg);
 int contactClientDataSocket(char *hostname, uint16_t portno);
 void handleRequest(int connectionSocketFd);
+void writeSocketError(int connectionSocketFd, char *msg);
 
 int main(int argc, char *argv[]) {
     int sockfd, connectionSocketFd;
@@ -46,27 +48,25 @@ int main(int argc, char *argv[]) {
 
 void handleRequest(int connectionSocketFd)
 {
-    char buffer[BSIZE], clientHostname[BSIZE], serverHostname[BSIZE], filename[BSIZE];
+    char buffer[BSIZE], clientHostname[BSIZE], filename[BSIZE];
     uint16_t portno;
     int dataSockFd;
-
-    memset(serverHostname, '\0', BSIZE);
-    if (gethostname(serverHostname, BSIZE - 1) < 0) {
-        perror("gethostname");
-        return;
-    }
+    char fileChunk[CHUNK_SIZE];
+    size_t numBytes = 0;
+    ssize_t sentBytes = 0;
+    int offset = 0;
 
     // read the host name
     memset(clientHostname, '\0', BSIZE);
     read(connectionSocketFd, clientHostname, BSIZE - 1);
     if (strlen(clientHostname) < 1) {
         fprintf(stderr, "ERROR, no host name given, %s\n", clientHostname);
-        write(connectionSocketFd, "0", 1);
+        write(connectionSocketFd, "NO HOST NAME GIVEN", strlen("NO HOST NAME GIVEN"));
         return;
     }
     printf("Connection from %s\n", clientHostname);
     // indicate successfully retrieved hostname
-    write(connectionSocketFd, serverHostname, strlen(serverHostname));
+    write(connectionSocketFd, "1", 1);
 
     // read the port number to connect on
     memset(buffer, '\0', BSIZE);
@@ -74,7 +74,7 @@ void handleRequest(int connectionSocketFd)
     portno = (uint16_t) atoi(buffer);
     if (portno == 0) {
         fprintf(stderr, "ERROR, invalid port number, %u\n", portno);
-        write(connectionSocketFd, "0", 1);
+        write(connectionSocketFd, "INVALID PORT NUMBER", strlen("INVALID PORT NUMBER"));
         return;
     }
     // indicate successful port number
@@ -98,10 +98,21 @@ void handleRequest(int connectionSocketFd)
         }
         // indicate successfully retrieved filename
         printf("File \"%s\" requested on port %u\n", filename, portno);
-        write(connectionSocketFd, "1", 1);
 
-        // TODO: implement action
-        // Send message to client, this could be files
+        FILE *sendfile;
+        sendfile = fopen(filename, "r");
+        // referenced linux man pages for fopen()
+        // http://man7.org/linux/man-pages/man3/fopen.3.html
+        if (sendfile == NULL) {
+            fprintf(stderr, "File not found. Sending error message to %s:%u\n", clientHostname, portno);
+//            write(connectionSocketFd, "FILE NOT FOUND", strlen("FILE NOT FOUND"));
+            writeSocketError(connectionSocketFd, "FILE NOT FOUND");
+            return;
+        } else {
+            write(connectionSocketFd, "1", 1);
+        }
+
+        // Connect to the client and send
         dataSockFd = contactClientDataSocket(clientHostname, portno);
         if (dataSockFd < 0) {
             fprintf(stderr, "ERROR, could not connect to client data socket, %u\n", portno);
@@ -109,9 +120,21 @@ void handleRequest(int connectionSocketFd)
             return;
         }
 
+        // referenced the following for sending files
+        // https://stackoverflow.com/questions/5594042/c-send-file-to-socket
+        // send the file
+        printf("Sending \"%s\" to %s:%u\n", filename, clientHostname, portno);
+        while ((numBytes = fread(fileChunk, sizeof(char), CHUNK_SIZE, sendfile)) > 0) {
+            offset = 0;
+            while((sentBytes = send(dataSockFd, fileChunk + offset, numBytes, 0)) > 0) {
+                offset += sentBytes;
+                numBytes -= sentBytes;
+            }
+            memset(fileChunk, '\0', BSIZE);
+        }
+
         // close the connection
         close(dataSockFd);
-
         return;
     }
 
@@ -132,7 +155,6 @@ void handleRequest(int connectionSocketFd)
         // Write directory filenames to socket
         // source for reading directory from the following link
         // https://www.gnu.org/software/libc/manual/html_node/Simple-Directory-Lister.html
-        // TODO: make sure cannot do buffer overflow
         printf("Sending directory contents to %s:%u\n", clientHostname, portno);
         memset(buffer, '\0', BSIZE);
         DIR *directory;
@@ -152,7 +174,7 @@ void handleRequest(int connectionSocketFd)
         return;
     }
 
-    write(connectionSocketFd, "0", 1);
+    write(connectionSocketFd, "INVALID COMMAND", strlen("INVALID COMMAND"));
     return;
 }
 
@@ -231,8 +253,7 @@ int contactClientDataSocket(char *hostname, uint16_t portno)
     //Connect to the socket
     sleep(1);
     if (connect(dataSockFd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        perror("data sock");
-//        fprintf(stderr, "Could not connect to port %u\n", portno);
+        perror("Client Data Socket");
         return -1;
     }
 
@@ -246,4 +267,9 @@ void error(const char *msg)
 {
     perror(msg);
     exit(1);
+}
+
+void writeSocketError(int connectionSocketFd, char *msg)
+{
+    write(connectionSocketFd, msg, strlen(msg));
 }

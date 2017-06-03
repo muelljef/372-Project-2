@@ -2,10 +2,14 @@
 from socket import *
 import signal
 import sys
+import os
 
+'''
+    main():
+'''
 def main():
-    clientSocket, command, filename, fileTransferPort = initiateContact()
-    makeRequest(clientSocket, command, filename, fileTransferPort)
+    clientSocket, command, filename, fileTransferPort, serverHost = initiateContact()
+    makeRequest(clientSocket, command, filename, fileTransferPort, serverHost)
     clientSocket.close()
 
 
@@ -17,7 +21,7 @@ def initiateContact():
         clientSocket = socket(AF_INET, SOCK_STREAM)
     except:
         print 'Failed to connect to ftserver.'
-        exit(1)
+        sys.exit(1)
 
     # get the command line params
     serverHost, serverPort, command, filename, fileTransferPort = getAndValidateArguments()
@@ -25,7 +29,7 @@ def initiateContact():
     serverIp = gethostbyname(serverHost)
     clientSocket.connect((serverIp, serverPort))
 
-    return clientSocket, command, filename, fileTransferPort
+    return clientSocket, command, filename, fileTransferPort, serverHost
 
 
 '''
@@ -34,7 +38,7 @@ def initiateContact():
     failure: prints error to screen and exits the program
 '''
 def getAndValidateArguments():
-    usage = 'usage: ftclient hostname server_port_number [-g filename | -l] data_transfer_port\n'
+    usage = 'usage: ftclient hostname server_port_number [-g filename | -l] data_transfer_port'
 
     if len(sys.argv) != 5 and len(sys.argv) != 6:
         print usage
@@ -46,20 +50,25 @@ def getAndValidateArguments():
         command = sys.argv[3]
         if command == '-g':
             if len(sys.argv) != 6:
-                print 'Invalid number of arguments for command: ' + command + '\n';
+                print 'Invalid number of arguments for command: ' + command;
                 print usage
                 sys.exit(1)
             filename = sys.argv[4]
+            # reference the following for checking if file exists
+            # http://www.pfinn.net/python-check-if-file-exists.html
+            if os.path.exists('./' + filename):
+                print 'Filename already exists, exiting'
+                sys.exit(1)
             fileTransferPort = int(sys.argv[5])
         elif command == '-l':
             filename = ''
             fileTransferPort = int(sys.argv[4])
         else:
-            print 'Invalid command given: ' + command + '\n';
+            print 'Invalid command given: ' + command;
             print usage
             sys.exit(1)
     except ValueError:
-        print 'A port number provided was not a valid integer\n'
+        print 'A port number provided was not a valid integer'
         sys.exit(1)
 
     if serverPort < 1 or serverPort > 65535:
@@ -76,33 +85,33 @@ def getAndValidateArguments():
 '''
     makeRequest(): 
 '''
-def makeRequest(clientSocket, command, filename, fileTransferPort):
+def makeRequest(clientSocket, command, filename, fileTransferPort, serverHostname):
     # send the host name
     clientSocket.send(gethostname())
-    serverHostname = clientSocket.recv(1024)
-    if serverHostname == '0':
-        print 'Server failed reading the hostname'
+    msg = clientSocket.recv(1024)
+    if msg != '1':
+        printErrorMsg(msg, serverHostname)
         return
 
     # send the port number
     clientSocket.send(str(fileTransferPort))
     msg = clientSocket.recv(1024);
     if msg != '1':
-        print 'Server failed to connect\n'
+        printErrorMsg(msg, serverHostname)
         return
 
     # send the command
     clientSocket.send(command)
     msg = clientSocket.recv(1024)
     if msg != '1':
-        print 'Server did not recognize the command'
+        printErrorMsg(msg, serverHostname)
         return
 
     if command == '-g':
         clientSocket.send(filename)
         msg = clientSocket.recv(1024)
         if msg != '1':
-            print 'Server did not read the filename'
+            printErrorMsg(msg, serverHostname)
             return
 
     try:
@@ -118,16 +127,13 @@ def makeRequest(clientSocket, command, filename, fileTransferPort):
 
     dataConnectionSocket, addr = dataSocket.accept()
 
-    # TODO: I think using the string file transfer port is wrong here (should be the port the server allocates right?)
     if command == '-l':
-        print "Receiving directory structure from " + serverHostname + "\n"
+        print "Receiving directory structure from ftserver on " + serverHostname
         msg = dataConnectionSocket.recv(1024)
         print msg + '\n'
 
     if command == '-g':
-        print "Receiving file from " + serverHostname + "\n"
-        # msg = dataConnectionSocket.recv(1024)
-        # print msg + '\n'
+        receiveFile(dataConnectionSocket, filename, serverHostname)
 
     dataConnectionSocket.close()
     dataSocket.close()
@@ -136,8 +142,29 @@ def makeRequest(clientSocket, command, filename, fileTransferPort):
 '''
     receiveFile(): 
 '''
-def receiveFile():
-    pass
+def receiveFile(dataConnectionSocket, filename, serverHostname):
+    print "Receiving file " + filename + " from ftserver on " + serverHostname
+    # referenced the following two links for python file IO
+    # http://www.pfinn.net/python-check-if-file-exists.html
+    # http://www.pythonforbeginners.com/files/reading-and-writing-files-in-python
+    try:
+        with open('./' + filename, 'w') as file:
+            # referenced the following for processing all of file
+            # https://stackoverflow.com/questions/8546870/why-does-this-socket-connection-only-allow-1-send-and-receive
+            while True:
+                data = dataConnectionSocket.recv(1024)
+                if data == '':
+                    break
+                file.write(data)
+        print "File transfer complete"
+    except IOError as e:
+        print 'Unable to open file'
+
+'''
+    printErrorMsg():
+'''
+def printErrorMsg(msg, serverHostname):
+    print 'ftserver on ' + serverHostname + ' says ' + msg
 
 
 if __name__ == "__main__":

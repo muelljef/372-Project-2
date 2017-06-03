@@ -1,1 +1,8 @@
-this is a small text file
+this is a short text file
+with
+only
+
+
+a 
+few
+lines

@@ -1,0 +1,14 @@
+#ftserver
+./ftserver hello
+./ftserver 70000
+./ftserver 50123
+
+#ftclient
+./ftclient jmueller-MS-7996 50000 -l 50124                      // Could not connect
+./ftclient jmueller-MS-7996 50123 -p 50124                      // invalid command
+./ftclient jmueller-MS-7996 50123 -p shortfile.txt 50124        // invalid command
+./ftclient jmueller-MS-7996 50123 -l 50124
+./ftclient jmueller-MS-7996 50123 -g shortfile.txt 50124
+./ftclient jmueller-MS-7996 50123 -g shortfile.txt 50125        // duplicate file
+./ftclient jmueller-MS-7996 50123 -g longfile.txt 50126
+./ftclient jmueller-MS-7996 50123 -g longfileee.txt 50127       // file does not exist
