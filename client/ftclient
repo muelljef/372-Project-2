@@ -63,6 +63,21 @@ def getAndValidateArguments():
     makeRequest(): 
 '''
 def makeRequest(clientSocket, command, filename, fileTransferPort):
+    # send the host name
+    clientSocket.send(gethostname())
+    serverHostname = clientSocket.recv(1024)
+    if serverHostname == '0':
+        print 'Server failed reading the hostname'
+        return
+
+    # send the port number
+    clientSocket.send(str(fileTransferPort))
+    msg = clientSocket.recv(1024);
+    if msg != '1':
+        print 'Server failed to connect\n'
+        return
+
+    # send the command
     clientSocket.send(command)
     msg = clientSocket.recv(1024)
     if msg != '1':
@@ -80,23 +95,10 @@ def makeRequest(clientSocket, command, filename, fileTransferPort):
         print 'Failed to bind the port' + str(fileTransferPort)
         return
 
-    # send the host name
-    clientSocket.send(gethostname())
-    msg = clientSocket.recv(1024)
-    if msg != '1':
-        print 'Server did not recognize the command'
-        return
-
-    # send the port number
-    clientSocket.send(str(fileTransferPort))
-    msg = clientSocket.recv(1024);
-    if msg != '1':
-        print 'Server failed to connect\n'
-        dataSocket.close()
-        return
-
     dataConnectionSocket, addr = dataSocket.accept()
 
+    # TODO: I think using the string file transfer port is wrong here (should be the port the server allocates right?)
+    print "Receiving directory structure from " + serverHostname + "\n"
     msg = dataConnectionSocket.recv(1024)
     print msg + '\n'
 
