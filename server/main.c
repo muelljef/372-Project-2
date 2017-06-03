@@ -2,26 +2,37 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <dirent.h>
-#include <signal.h>
-#include <syslog.h>
-#include <errno.h>
-#include <sys/wait.h>
-#include <fcntl.h>
 
 #define BSIZE 4096
 #define CHUNK_SIZE 512
 
 int startUp(int argc, char *argv[]);
-void error(const char *msg);
 int contactClientDataSocket(char *hostname, uint16_t portno);
 void handleRequest(int connectionSocketFd);
 void writeSocketError(int connectionSocketFd, char *msg);
 
+/*
+ * ftserver <PORT_NUMBER>: When ftserver is started with a valid port number it will
+ *  create a socket which will accept one connection at a time. The client can pass
+ *  commands of -l for listing the files in the current directory or -g <FILENAME> to
+ *  get the file. ftserver will return the list of files or the file contents on the
+ *  client data socket. The client must pass it's hostname and port number for ftserver
+ *  to make the connection
+ *
+ * I have reused/altered code written for an OSU CS 344 Operating Systems assignment.
+ * Essentially I have re-used code that is taught in that course for the use of sockets
+ * and string manipulation. I reference numerous other sites for further needed solutions
+ * and those citations are within the codebase next to where they are used
+ *
+ * I often referenced the following sites for details on string/input manipulation in C
+ * which likely influenced some of my string/input code
+ * https://www.tutorialspoint.com/cprogramming/
+ * http://www.cplusplus.com/reference/clibrary/
+ */
 int main(int argc, char *argv[]) {
     int sockfd, connectionSocketFd;
 
@@ -40,12 +51,73 @@ int main(int argc, char *argv[]) {
 
         handleRequest(connectionSocketFd);
         close(connectionSocketFd);
-        // TODO: add SIGINT handler above to close the sockfd
-//        close(sockfd);
-//        return 0;
     }
 }
 
+/*
+ * startUp: Parses the command line arguments for port number and validates it. Then
+ * it sets up a socket to listen on, returning the socketfd
+ *
+ * entry: argc and argv from the command line parameters passed to main
+ * exit: returns a socked file descriptor integer
+ */
+int startUp(int argc, char *argv[])
+{
+    uint16_t portno;
+    int sockfd;
+    struct sockaddr_in serv_addr;
+
+    //Checking enough arguments given
+    if (argc < 2) {
+        fprintf(stderr,"ERROR, no port provided\n");
+        exit(1);
+    } else if (argc > 2) {
+        fprintf(stderr,"ERROR, too many arguments\n");
+        exit(1);
+    }
+
+    // Convert and check that the port number given is in the valid range
+    portno = (uint16_t) atoi(argv[1]);
+    if (portno == 0) {
+        fprintf(stderr, "ERROR, invalid port number, %u\n", portno);
+        exit(1);
+    }
+
+    //Creating the socket
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        perror("ERROR opening socket");
+        exit(1);
+    }
+
+    //Setting the server address to accept any clients
+    memset((char *) &serv_addr, '\0', sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = INADDR_ANY;
+    serv_addr.sin_port = htons(portno);
+
+    //Binding the socket
+    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+        perror("ERROR on binding");
+        exit(1);
+    }
+
+    //Listening on the socket
+    listen(sockfd, 1);
+    printf("Server open on %u\n", portno);
+
+    return sockfd;
+}
+
+/*
+ * handleRequest: handles the request from the client. It can handle -l for listing files in the directory
+ * and -g <FILENAME> to get a file in the directory
+ *
+ * entry: the client connection socket file descriptor to listen on
+ *
+ * exit: No return value. A message will print to screen for an error. Other messages will print to screen to
+ * indicate progress such as sending directory list or files
+ */
 void handleRequest(int connectionSocketFd)
 {
     char buffer[BSIZE], clientHostname[BSIZE], filename[BSIZE];
@@ -61,23 +133,23 @@ void handleRequest(int connectionSocketFd)
     read(connectionSocketFd, clientHostname, BSIZE - 1);
     if (strlen(clientHostname) < 1) {
         fprintf(stderr, "ERROR, no host name given, %s\n", clientHostname);
-        write(connectionSocketFd, "NO HOST NAME GIVEN", strlen("NO HOST NAME GIVEN"));
+        writeSocketError(connectionSocketFd, "NO HOST NAME GIVEN");
         return;
     }
     printf("Connection from %s\n", clientHostname);
-    // indicate successfully retrieved hostname
+    // indicate successfully retrieved hostname to client
     write(connectionSocketFd, "1", 1);
 
-    // read the port number to connect on
+    // read the port number for the data connection
     memset(buffer, '\0', BSIZE);
     read(connectionSocketFd, buffer, BSIZE - 1);
     portno = (uint16_t) atoi(buffer);
     if (portno == 0) {
         fprintf(stderr, "ERROR, invalid port number, %u\n", portno);
-        write(connectionSocketFd, "INVALID PORT NUMBER", strlen("INVALID PORT NUMBER"));
+        writeSocketError(connectionSocketFd, "INVALID PORT NUMBER");
         return;
     }
-    // indicate successful port number
+    // indicate successful port number to client
     write(connectionSocketFd, "1", 1);
 
     // read the command
@@ -93,10 +165,9 @@ void handleRequest(int connectionSocketFd)
         read(connectionSocketFd, filename, BSIZE - 1);
         if (strlen(filename) < 1) {
             fprintf(stderr, "ERROR, no file name given, %s\n", filename);
-            write(connectionSocketFd, "0", 1);
+            writeSocketError(connectionSocketFd, "NO FILENAME GIVEN");
             return;
         }
-        // indicate successfully retrieved filename
         printf("File \"%s\" requested on port %u\n", filename, portno);
 
         FILE *sendfile;
@@ -105,10 +176,10 @@ void handleRequest(int connectionSocketFd)
         // http://man7.org/linux/man-pages/man3/fopen.3.html
         if (sendfile == NULL) {
             fprintf(stderr, "File not found. Sending error message to %s:%u\n", clientHostname, portno);
-//            write(connectionSocketFd, "FILE NOT FOUND", strlen("FILE NOT FOUND"));
             writeSocketError(connectionSocketFd, "FILE NOT FOUND");
             return;
         } else {
+            // indicate successfully retrieved filename
             write(connectionSocketFd, "1", 1);
         }
 
@@ -116,7 +187,7 @@ void handleRequest(int connectionSocketFd)
         dataSockFd = contactClientDataSocket(clientHostname, portno);
         if (dataSockFd < 0) {
             fprintf(stderr, "ERROR, could not connect to client data socket, %u\n", portno);
-            write(connectionSocketFd, "0", 1);
+            writeSocketError(connectionSocketFd, "COULD NOT CONNECT TO DATA SOCKET");
             return;
         }
 
@@ -148,7 +219,7 @@ void handleRequest(int connectionSocketFd)
         dataSockFd = contactClientDataSocket(clientHostname, portno);
         if (dataSockFd < 0) {
             fprintf(stderr, "ERROR, could not connect to client data socket, %u\n", portno);
-            write(connectionSocketFd, "0", 1);
+            writeSocketError(connectionSocketFd, "COULD NOT CONNECT TO DATA SOCKET");
             return;
         }
 
@@ -178,52 +249,13 @@ void handleRequest(int connectionSocketFd)
     return;
 }
 
-int startUp(int argc, char *argv[])
-{
-    uint16_t portno;
-    int sockfd;
-    struct sockaddr_in serv_addr;
-
-    //Checking enough arguments given
-    if (argc < 2) {
-        fprintf(stderr,"ERROR, no port provided\n");
-        exit(1);
-    } else if (argc > 2) {
-        fprintf(stderr,"ERROR, too many arguments\n");
-        exit(1);
-    }
-
-    // Convert and check that the port number given is in the valid range
-    portno = (uint16_t) atoi(argv[1]);
-    if (portno == 0) {
-        fprintf(stderr, "ERROR, invalid port number, %u\n", portno);
-        exit(1);
-    }
-
-    //Creating the socket
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        error("ERROR opening socket");
-    }
-
-    //Setting the server address to accept any clients
-    memset((char *) &serv_addr, '\0', sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = INADDR_ANY;
-    serv_addr.sin_port = htons(portno);
-
-    //Binding the socket
-    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-        error("ERROR on binding");
-    }
-
-    //Listening on the socket
-    listen(sockfd, 1);
-    printf("Server open on %u\n", portno);
-
-    return sockfd;
-}
-
+/*
+ * contactClientDataSocket: Makes a connection with the client data socket and returns the file descriptor
+ *
+ * entry: the client hostname and port number to connect on
+ *
+ * exit: a file descriptor of the successful socket or -1 for failure
+ */
 int contactClientDataSocket(char *hostname, uint16_t portno)
 {
     int dataSockFd;
@@ -260,15 +292,14 @@ int contactClientDataSocket(char *hostname, uint16_t portno)
     return dataSockFd;
 }
 
-//From TLPI
-//entry: message to display with perror
-//exit: will display perror message then exit with status 1
-void error(const char *msg)
-{
-    perror(msg);
-    exit(1);
-}
-
+/*
+ * writeSocketError: writes and error message to the given socket connection. Automatically calculating the string
+ * length to pass to write
+ *
+ * entry: a valid connection socket and a message
+ *
+ * exit: the message will be written to the socket, no return value
+ */
 void writeSocketError(int connectionSocketFd, char *msg)
 {
     write(connectionSocketFd, msg, strlen(msg));

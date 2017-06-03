@@ -1,11 +1,34 @@
 #!/usr/bin/python
 from socket import *
-import signal
 import sys
 import os
 
 '''
-    main():
+    ftclient:
+        usage: ftclient server_hostname server_port_number [-g filename | -l] data_transfer_port
+
+        ftclient can make a connection with a ftserver. It needs to specify the server host name and server port number
+        to make the connection. After the connection is made ftclient will pass it's hostname, data transfer port,
+        and command to the ftserver application along with a filename for the -g command
+        
+        when the -l command is issued the ftserver will return the list of files in the directory and ftclient
+        will display the files on screen
+        
+        when -g filename is issued, ftserver will return the file contents and ftclient will create and save the file
+        in the current directory. ftclient will check to see if the file exists before making contact with the server
+        
+
+    Sources used to generate code for 
+    // The following provided code sample for accessing command line arguments and calling main() method
+    https://www.tutorialspoint.com/python/python_command_line_arguments.htm
+
+    // The following was used to create socket client connections, as well as a 'server' for the data connection
+    http://www.binarytides.com/python-socket-programming-tutorial/
+
+    // Referenced in the code as well, this solution made the socket available immediately after the program is closed
+    http://stackoverflow.com/questions/27360218/how-to-close-socket-connection-on-ctrl-c-in-a-python-program
+    
+    // There are numerous other specific cititations near the code they related to in the ftclient code
 '''
 def main():
     clientSocket, command, filename, fileTransferPort, serverHost = initiateContact()
@@ -15,6 +38,9 @@ def main():
 
 '''
     initiateContact(): Initiates contact with the server using the given server host and server port #
+    success: returns the client socket, command (-l or -g), filename (blank for -l), data transfer port number
+        and the server host name
+    failure: print error message to screen and exits
 '''
 def initiateContact():
     try:
@@ -26,8 +52,12 @@ def initiateContact():
     # get the command line params
     serverHost, serverPort, command, filename, fileTransferPort = getAndValidateArguments()
 
-    serverIp = gethostbyname(serverHost)
-    clientSocket.connect((serverIp, serverPort))
+    try:
+        serverIp = gethostbyname(serverHost)
+        clientSocket.connect((serverIp, serverPort))
+    except:
+        print 'Connection to host ' + serverHost + ' and port ' + str(serverPort) + ' failed'
+        sys.exit(1)
 
     return clientSocket, command, filename, fileTransferPort, serverHost
 
@@ -38,7 +68,7 @@ def initiateContact():
     failure: prints error to screen and exits the program
 '''
 def getAndValidateArguments():
-    usage = 'usage: ftclient hostname server_port_number [-g filename | -l] data_transfer_port'
+    usage = 'usage: ftclient server_hostname server_port_number [-g filename | -l] data_transfer_port'
 
     if len(sys.argv) != 5 and len(sys.argv) != 6:
         print usage
@@ -83,7 +113,10 @@ def getAndValidateArguments():
 
 
 '''
-    makeRequest(): 
+    makeRequest(): communicates with the ftserver on the client socket connection passing the 
+    client host name, client data transfer port number, the command, and filename for -g command
+    success: will display the file directory on screen for -l and will save the file for -g
+    failure: print and error message and return
 '''
 def makeRequest(clientSocket, command, filename, fileTransferPort, serverHostname):
     # send the host name
@@ -140,7 +173,10 @@ def makeRequest(clientSocket, command, filename, fileTransferPort, serverHostnam
 
 
 '''
-    receiveFile(): 
+    receiveFile(): Receives file data from the data connection socket
+    success: creates a file of filename and writes the data from the connect to the file. Printing message to screen
+        when complete
+    failure: prints error message if unable to open file for writing
 '''
 def receiveFile(dataConnectionSocket, filename, serverHostname):
     print "Receiving file " + filename + " from ftserver on " + serverHostname
@@ -161,7 +197,7 @@ def receiveFile(dataConnectionSocket, filename, serverHostname):
         print 'Unable to open file'
 
 '''
-    printErrorMsg():
+    printErrorMsg(): Prints an error message to the screen from the ftserver application
 '''
 def printErrorMsg(msg, serverHostname):
     print 'ftserver on ' + serverHostname + ' says ' + msg
